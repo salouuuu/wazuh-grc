@@ -270,12 +270,19 @@
                 Responsable
             </label>
 
-            <input type="text"
-                   name="responsable"
-                   value="{{ old('responsable', $incident->responsable) }}"
-                   class="w-full border-gray-300 rounded"
-                   placeholder="Ex : Administrateur système">
+<select name="responsable_user_id"
+        class="w-full border-gray-300 rounded">
 
+    <option value="">-- Sélectionner un responsable --</option>
+
+    @foreach($users as $user)
+        <option value="{{ $user->id }}"
+            {{ old('responsable_user_id', $incident->responsable_user_id) == $user->id ? 'selected' : '' }}>
+            {{ $user->name }}
+        </option>
+    @endforeach
+
+</select>
         </div>
 
         {{-- Échéance --}}

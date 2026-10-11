@@ -1,6 +1,7 @@
 <?php
 
 namespace App\Models;
+use App\Models\User;
 
 use Illuminate\Database\Eloquent\Model;
 use App\Models\ComplianceControl;
@@ -31,6 +32,7 @@ class Incident extends Model
         'compliance_status',
         'compliance_control',
         'compliance_comment',
+'responsable_user_id',
     ];
 
     protected $casts = [
@@ -41,5 +43,10 @@ class Incident extends Model
 public function complianceControl()
 {
     return $this->belongsTo(ComplianceControl::class, 'compliance_control');
+}
+
+public function responsable()
+{
+    return $this->belongsTo(User::class, 'responsable_user_id');
 }
 }

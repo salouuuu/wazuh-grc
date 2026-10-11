@@ -5,6 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\Incident;
 use Illuminate\Http\Request;
 use App\Models\ComplianceControl;
+use App\Models\User;
+
+use App\Mail\IncidentAssigned;
+use Illuminate\Support\Facades\Mail;
 
 class IncidentController extends Controller
 {
@@ -92,9 +96,12 @@ public function show(Incident $incident)
         ->orderBy('control_code')
         ->get();
 
+    $users = User::orderBy('name')->get();
+
     return view('incidents.show', compact(
         'incident',
-        'complianceControls'
+        'complianceControls',
+        'users'
     ));
 }
     public function update(Request $request, Incident $incident)
@@ -106,7 +113,7 @@ $validated = $request->validate([
     'comment' => 'nullable|string|max:2000',
 
     'action_corrective' => 'nullable|string|max:5000',
-    'responsable' => 'nullable|string|max:255',
+'responsable_user_id' => 'nullable|exists:users,id',
     'due_date' => 'nullable|date',
 'compliance_status' => 'nullable|in:Conforme,Partiellement conforme,Non conforme',
 'compliance_control' => 'nullable|integer',
@@ -143,6 +150,17 @@ $incident->update([
     'compliance' => $validated['compliance_status'] ?? 'À évaluer',
     'risk_level' => $risk,
 ]);
+
+// Envoyer un e-mail au responsable sélectionné
+if (!empty($validated['responsable_user_id'])) {
+    $responsable = User::find($validated['responsable_user_id']);
+
+    if ($responsable && $responsable->email) {
+        Mail::to($responsable->email)->send(
+            new IncidentAssigned($incident, $responsable)
+        );
+    }
+}
         return redirect()
             ->route('incidents.show', $incident)
             ->with('success', 'Évaluation GRC mise à jour.');
