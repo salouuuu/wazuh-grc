@@ -28,6 +28,16 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'wazuh' => [
+        'url' => env('WAZUH_INDEXER_URL'),
+        'username' => env('WAZUH_INDEXER_USERNAME'),
+        'password' => env('WAZUH_INDEXER_PASSWORD'),
+        // true, false, ou chemin vers le certificat racine (root-ca.pem) de l'Indexer
+        'verify' => env('WAZUH_INDEXER_VERIFY', true),
+        'index' => env('WAZUH_ALERTS_INDEX', 'wazuh-alerts-4.x-*'),
+        'min_level' => (int) env('WAZUH_MIN_LEVEL', 8),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

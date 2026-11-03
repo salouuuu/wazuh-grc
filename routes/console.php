@@ -9,4 +9,4 @@ Artisan::command('inspire', function () {
 
 use Illuminate\Support\Facades\Schedule;
 
-Schedule::command('wazuh:import --limit=20')->everyFiveMinutes();
+Schedule::command('wazuh:import')->everyFiveMinutes()->withoutOverlapping();

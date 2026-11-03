@@ -22,6 +22,13 @@
 
                         <p class="text-sm text-gray-500 mt-1">
                             Incident #{{ $incident->id }}
+                            · {{ $incident->statusLabel() }}
+                            @if($incident->category)
+                                · {{ $incident->category }}
+                            @endif
+                            @if($incident->occurrences > 1)
+                                · <strong>alerte répétée {{ $incident->occurrences }} fois</strong>
+                            @endif
                         </p>
                     </div>
 
@@ -32,6 +39,14 @@
 
                 </div>
 
+
+                @if($incident->duplicateOf)
+                    <div class="mb-6 p-4 bg-yellow-50 text-yellow-800 rounded">
+                        Cette alerte est un doublon regroupé dans l'incident
+                        <a href="{{ route('incidents.show', $incident->duplicateOf) }}" class="underline font-semibold">#{{ $incident->duplicateOf->id }}</a> :
+                        traitez l'incident principal.
+                    </div>
+                @endif
 
                 {{-- Informations Wazuh --}}
                 <div class="border-t pt-6">
@@ -72,9 +87,85 @@
                             {{ $incident->detected_at?->format('d/m/Y H:i:s') ?? '—' }}
                         </div>
 
+                        @if($incident->occurrences > 1)
+                            <div>
+                                <strong>Dernière occurrence :</strong>
+                                {{ $incident->last_seen_at?->format('d/m/Y H:i:s') ?? '—' }}
+                                ({{ $incident->occurrences }} alertes)
+                            </div>
+                        @endif
+
+                        @if($groups = data_get($incident->wazuh_data, 'rule.groups'))
+                            <div>
+                                <strong>Groupes Wazuh :</strong>
+                                {{ implode(', ', $groups) }}
+                            </div>
+                        @endif
+
                     </div>
 
+                    {{-- Référentiels fournis nativement par la règle Wazuh --}}
+                    @php
+                        $frameworks = collect([
+                            'ISO 27001:2013' => data_get($incident->wazuh_data, 'rule.iso_27001-2013'),
+                            'PCI DSS' => data_get($incident->wazuh_data, 'rule.pci_dss'),
+                            'RGPD' => data_get($incident->wazuh_data, 'rule.gdpr'),
+                            'NIST 800-53' => data_get($incident->wazuh_data, 'rule.nist_800_53'),
+                            'HIPAA' => data_get($incident->wazuh_data, 'rule.hipaa'),
+                            'TSC (SOC 2)' => data_get($incident->wazuh_data, 'rule.tsc'),
+                            'CIS' => data_get($incident->wazuh_data, 'rule.cis'),
+                            'MITRE ATT&CK' => data_get($incident->wazuh_data, 'rule.mitre.technique') ?? data_get($incident->wazuh_data, 'rule.mitre_techniques'),
+                        ])->filter();
+                    @endphp
+
+                    @if($frameworks->isNotEmpty())
+                        <div class="mt-4">
+                            <p class="text-sm font-medium text-gray-700 mb-2">Référentiels associés par Wazuh</p>
+                            <div class="flex flex-wrap gap-2">
+                                @foreach($frameworks as $framework => $refs)
+                                    <span class="px-2 py-1 text-xs rounded bg-indigo-50 text-indigo-700">
+                                        {{ $framework }} : {{ implode(', ', (array) $refs) }}
+                                    </span>
+                                @endforeach
+                            </div>
+                        </div>
+                    @endif
+
                 </div>
+
+
+                {{-- Contrôle SCA (CIS) --}}
+                @if($check = data_get($incident->wazuh_data, 'data.sca.check'))
+                    <div class="border-t mt-6 pt-6">
+
+                        <h3 class="text-lg font-semibold mb-4">
+                            Contrôle de configuration (SCA)
+                        </h3>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                            <div><strong>Politique :</strong> {{ data_get($incident->wazuh_data, 'data.sca.policy', '—') }}</div>
+                            <div><strong>Contrôle :</strong> #{{ $check['id'] ?? '—' }} {{ $check['title'] ?? '' }}</div>
+                            <div>
+                                <strong>Résultat :</strong>
+                                <span class="{{ ($check['result'] ?? '') === 'failed' ? 'text-red-600 font-semibold' : '' }}">{{ $check['result'] ?? '—' }}</span>
+                                @isset($check['previous_result'])
+                                    (avant : {{ $check['previous_result'] }})
+                                @endisset
+                            </div>
+                        </div>
+
+                        @isset($check['rationale'])
+                            <p class="mt-4 text-sm text-gray-700"><strong>Pourquoi :</strong> {{ $check['rationale'] }}</p>
+                        @endisset
+
+                        @isset($check['remediation'])
+                            <p class="mt-4 text-sm font-medium text-gray-700">Correction recommandée</p>
+                            <p class="mt-1 text-sm bg-gray-100 p-4 rounded">{{ $check['remediation'] }}</p>
+                        @endisset
+
+                    </div>
+                @endif
+
 
 
                 {{-- Description --}}
@@ -211,28 +302,15 @@
                                     Statut
                                 </label>
 
-                                <select name="status"
+                                <select name="status" id="status-select"
                                         class="w-full border-gray-300 rounded">
 
-                                    <option value="new"
-                                        @selected($incident->status === 'new')>
-                                        Nouveau
-                                    </option>
-
-                                    <option value="in_progress"
-                                        @selected($incident->status === 'in_progress')>
-                                        En cours
-                                    </option>
-
-                                    <option value="resolved"
-                                        @selected($incident->status === 'resolved')>
-                                        Résolu
-                                    </option>
-
-                                    <option value="closed"
-                                        @selected($incident->status === 'closed')>
-                                        Clôturé
-                                    </option>
+                                    @foreach(\App\Models\Incident::STATUSES as $value => $label)
+                                        <option value="{{ $value }}"
+                                            @selected(old('status', $incident->status) === $value)>
+                                            {{ $label }}
+                                        </option>
+                                    @endforeach
 
                                 </select>
 
@@ -283,6 +361,12 @@
     @endforeach
 
 </select>
+
+            {{-- Renvoi volontaire au même responsable (nouvelle tâche, mise à jour) --}}
+            <label class="mt-2 inline-flex items-center gap-2 text-sm text-gray-600">
+                <input type="checkbox" name="resend_email" value="1" class="rounded border-gray-300">
+                Renvoyer l'e-mail au responsable
+            </label>
         </div>
 
         {{-- Échéance --}}
@@ -360,7 +444,15 @@
 
 
 
-{{-- Matrice de risque --}}
+{{-- Matrice de risque (générée par App\Services\RiskCalculator) --}}
+@php
+    $riskColors = [
+        'Faible' => ['#bbf7d0', '#4ade80'],
+        'Moyen' => ['#fef08a', '#facc15'],
+        'Élevé' => ['#fed7aa', '#fb923c'],
+        'Critique' => ['#fecaca', '#f87171'],
+    ];
+@endphp
 <div class="mt-6">
 
     <h3 class="text-lg font-semibold mb-4">
@@ -377,141 +469,36 @@
                         Probabilité ↓ / Impact →
                     </th>
 
-                    <th class="border border-gray-300 p-3">
-                        Faible
-                    </th>
-
-                    <th class="border border-gray-300 p-3">
-                        Moyen
-                    </th>
-
-                    <th class="border border-gray-300 p-3">
-                        Élevé
-                    </th>
-
-                    <th class="border border-gray-300 p-3">
-                        Critique
-                    </th>
+                    @foreach(array_keys(reset($riskMatrix)) as $impact)
+                        <th class="border border-gray-300 p-3">
+                            {{ $impact }}
+                        </th>
+                    @endforeach
                 </tr>
             </thead>
 
             <tbody>
 
-                {{-- Très élevée --}}
-                <tr>
+                @foreach($riskMatrix as $probability => $row)
+                    <tr>
 
-                    <th class="border border-gray-300 p-3 bg-gray-100">
-                        Très élevée
-                    </th>
+                        <th class="border border-gray-300 p-3 bg-gray-100">
+                            {{ $probability }}
+                        </th>
 
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Très élevée' && $incident->impact === 'Faible' ? '#86efac' : '#bbf7d0' }};">
-                        Moyen
-                    </td>
+                        @foreach($row as $impact => $level)
+                            @php
+                                $isCurrent = $incident->probability === $probability && $incident->impact === $impact;
+                            @endphp
 
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Très élevée' && $incident->impact === 'Moyen' ? '#fb923c' : '#fed7aa' }};">
-                        Élevé
-                    </td>
+                            <td class="border border-gray-300 p-3 {{ $isCurrent ? 'font-bold ring-2 ring-inset ring-gray-800' : '' }}"
+                                style="background-color: {{ $riskColors[$level][$isCurrent ? 1 : 0] }};">
+                                {{ $level }}
+                            </td>
+                        @endforeach
 
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Très élevée' && $incident->impact === 'Élevé' ? '#f87171' : '#fecaca' }};">
-                        Critique
-                    </td>
-
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Très élevée' && $incident->impact === 'Critique' ? '#f87171' : '#fecaca' }};">
-                        Critique
-                    </td>
-
-                </tr>
-
-                {{-- Élevée --}}
-                <tr>
-
-                    <th class="border border-gray-300 p-3 bg-gray-100">
-                        Élevée
-                    </th>
-
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Élevée' && $incident->impact === 'Faible' ? '#86efac' : '#fef08a' }};">
-                        Moyen
-                    </td>
-
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Élevée' && $incident->impact === 'Moyen' ? '#fb923c' : '#fed7aa' }};">
-                        Élevé
-                    </td>
-
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Élevée' && $incident->impact === 'Élevé' ? '#fb923c' : '#fed7aa' }};">
-                        Élevé
-                    </td>
-
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Élevée' && $incident->impact === 'Critique' ? '#f87171' : '#fecaca' }};">
-                        Critique
-                    </td>
-
-                </tr>
-
-                {{-- Moyenne --}}
-                <tr>
-
-                    <th class="border border-gray-300 p-3 bg-gray-100">
-                        Moyenne
-                    </th>
-
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Moyenne' && $incident->impact === 'Faible' ? '#4ade80' : '#bbf7d0' }};">
-                        Faible
-                    </td>
-
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Moyenne' && $incident->impact === 'Moyen' ? '#facc15' : '#fef08a' }};">
-                        Moyen
-                    </td>
-
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Moyenne' && $incident->impact === 'Élevé' ? '#fb923c' : '#fed7aa' }};">
-                        Élevé
-                    </td>
-
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Moyenne' && $incident->impact === 'Critique' ? '#fb923c' : '#fed7aa' }};">
-                        Élevé
-                    </td>
-
-                </tr>
-
-                {{-- Faible --}}
-                <tr>
-
-                    <th class="border border-gray-300 p-3 bg-gray-100">
-                        Faible
-                    </th>
-
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Faible' && $incident->impact === 'Faible' ? '#4ade80' : '#bbf7d0' }};">
-                        Faible
-                    </td>
-
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Faible' && $incident->impact === 'Moyen' ? '#4ade80' : '#bbf7d0' }};">
-                        Faible
-                    </td>
-
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Faible' && $incident->impact === 'Élevé' ? '#facc15' : '#fef08a' }};">
-                        Moyen
-                    </td>
-
-                    <td class="border border-gray-300 p-3"
-                        style="background-color: {{ $incident->probability === 'Faible' && $incident->impact === 'Critique' ? '#facc15' : '#fef08a' }};">
-                        Moyen
-                    </td>
-
-                </tr>
+                    </tr>
+                @endforeach
 
             </tbody>
 
@@ -549,6 +536,44 @@
     <h3 class="text-lg font-semibold mb-4">
         Conformité
     </h3>
+
+    {{-- Contrôles suggérés : type d'alerte (suggestion automatique) + correspondance ISO 2013 → 2022 --}}
+    @php
+        $preselected = !$incident->compliance_control ? $suggestedControl?->control_code : null;
+
+        // Intitulés : ceux de la liste de l'application, puis ceux de la suggestion automatique, puis la table ISO
+        preg_match_all('/ISO 27001 - (A\.\d+\.\d+) : ([^,]+)/', (string) $incident->compliance, $groupTitles);
+        $suggestionTitles = $complianceControls->where('framework', 'ISO 27001')->pluck('title', 'control_code')->all()
+            + array_combine($groupTitles[1], array_map('trim', $groupTitles[2]))
+            + config('iso27001.controls');
+    @endphp
+
+    @if(!empty($isoSuggestions))
+        <div class="mb-4 p-4 bg-indigo-50 text-indigo-900 rounded text-sm">
+            <p class="font-medium mb-2">Contrôles suggérés</p>
+            <ul class="space-y-1">
+                @foreach($isoSuggestions as $code => $sources)
+                    <li>
+                        <span class="inline-block w-4">{{ $code === $preselected ? '★' : '' }}</span>
+                        <strong>{{ $code }}</strong>
+                        {{ $suggestionTitles[$code] ?? '' }}
+                        <span class="text-indigo-600">← {{ implode(', ', array_unique($sources)) }}</span>
+                        @unless($complianceControls->contains('control_code', $code))
+                            <span class="text-gray-500">(absent de la liste)</span>
+                        @endunless
+                    </li>
+                @endforeach
+            </ul>
+            <p class="mt-2 text-xs text-indigo-700">
+                @if($preselected)
+                    ★ {{ $preselected }} est pré-sélectionné ci-dessous : à vous de valider ou de choisir un autre contrôle.
+                @else
+                    Suggestion seulement : le contrôle retenu reste votre choix.
+                @endif
+                <a href="{{ route('iso.mapping') }}" class="underline">Table de correspondance complète</a>
+            </p>
+        </div>
+    @endif
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 
@@ -604,11 +629,14 @@
         @foreach($complianceControls as $control)
 
             <option value="{{ $control->id }}"
-                @selected($incident->compliance_control == $control->id)>
+                @selected(($incident->compliance_control ?? $suggestedControl?->id) == $control->id)>
 
                 {{ $control->framework }}
                 - {{ $control->control_code }}
                 : {{ $control->title }}
+                @if(!$incident->compliance_control && $suggestedControl?->id === $control->id)
+                    (suggéré)
+                @endif
 
             </option>
 
@@ -618,10 +646,8 @@
 
 </div>
 
-</select>
         </div>
 
-    </div>
 
 
     {{-- Justification conformité --}}
@@ -654,6 +680,122 @@
 
                 </div>
 
+
+                {{-- Suivi : état initial → ce qui a été fait → état final (lecture seule) --}}
+                @php
+                    $initial = $incident->initial_state ?? [];
+                    $final = $incident->stateSnapshot();
+                    $sca = $incident->scaSummary();
+                    $finalScaResult = $sca['result'] ?? $final['sca_result'];
+                    $day = fn ($date) => $date ? \Illuminate\Support\Carbon::parse($date)->format('d/m/Y') : '—';
+                    $trackedRows = [
+                        'Conformité' => 'compliance_status',
+                        'Probabilité / Impact' => null,
+                        'Risque' => 'risk_level',
+                    ];
+                @endphp
+                @if($initial)
+                    <div class="border-t mt-6 pt-6">
+
+                        <h3 class="text-lg font-semibold mb-4">
+                            Suivi de l'incident
+                            @if($checkId = data_get($incident->wazuh_data, 'data.sca.check.id'))
+                                (contrôle CIS {{ $checkId }})
+                            @endif
+                        </h3>
+
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full border border-gray-300 text-sm">
+                                <thead>
+                                    <tr class="bg-gray-100">
+                                        <th class="border border-gray-300 p-2"></th>
+                                        <th class="border border-gray-300 p-2 text-left">État initial</th>
+                                        <th class="border border-gray-300 p-2 text-left">Ce qui a été fait</th>
+                                        <th class="border border-gray-300 p-2 text-left">État final</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <th class="border border-gray-300 p-2 bg-gray-100 text-left">Date</th>
+                                        <td class="border border-gray-300 p-2">{{ $day($initial['date'] ?? null) }} (détection)</td>
+                                        <td class="border border-gray-300 p-2 align-top" rowspan="{{ $finalScaResult ? 5 : 4 }}">
+                                            {{ $incident->action_corrective ?: 'Aucune action renseignée (champ « Action corrective »).' }}
+                                            <p class="mt-2 text-gray-500">Statut : {{ $incident->statusLabel() }}</p>
+                                        </td>
+                                        <td class="border border-gray-300 p-2">
+                                            @if(($sca['result'] ?? null) === 'passed')
+                                                {{ $day($sca['since']) }} (vérifié par Wazuh)
+                                            @else
+                                                {{ $day($incident->updated_at) }} (dernière mise à jour)
+                                            @endif
+                                        </td>
+                                    </tr>
+                                    @if($finalScaResult)
+                                        <tr>
+                                            <th class="border border-gray-300 p-2 bg-gray-100 text-left">Résultat CIS</th>
+                                            <td class="border border-gray-300 p-2">{{ $initial['sca_result'] ?? '—' }}</td>
+                                            <td class="border border-gray-300 p-2 {{ $finalScaResult === 'passed' ? 'text-green-700 font-semibold' : 'text-red-600 font-semibold' }}">
+                                                {{ $finalScaResult }}{{ $finalScaResult === 'passed' ? ' ✔' : '' }}
+                                            </td>
+                                        </tr>
+                                    @endif
+                                    @foreach($trackedRows as $label => $key)
+                                        @php
+                                            $before = $key ? ($initial[$key] ?? null) : ($initial['probability'] ?? '—').' / '.($initial['impact'] ?? '—');
+                                            $after = $key ? $final[$key] : ($final['probability'] ?? '—').' / '.($final['impact'] ?? '—');
+                                        @endphp
+                                        <tr>
+                                            <th class="border border-gray-300 p-2 bg-gray-100 text-left">{{ $label }}</th>
+                                            <td class="border border-gray-300 p-2">{{ $before ?? '—' }}</td>
+                                            <td class="border border-gray-300 p-2 {{ $before !== $after ? 'font-semibold' : '' }}">{{ $after ?? '—' }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+
+                        @if($sca)
+                            <p class="mt-2 text-sm text-gray-500">
+                                Historique Wazuh : première détection le {{ $day($sca['first_seen']) }}
+                                @if($sca['corrections'] || $sca['regressions'])
+                                    — {{ $sca['corrections'] }} correction(s), {{ $sca['regressions'] }} régression(s)
+                                @endif
+                            </p>
+
+                            @if($sca['result'] === 'failed' && in_array($incident->status, ['resolved', 'closed']))
+                                <p class="mt-2 p-3 bg-red-50 text-red-700 rounded text-sm">
+                                    ⚠ Régression : Wazuh voit de nouveau ce contrôle en échec depuis le {{ $day($sca['since']) }}.
+                                </p>
+                            @elseif($sca['result'] === 'passed' && in_array($incident->status, ['new', 'in_progress']))
+                                <p class="mt-2 p-3 bg-green-50 text-green-700 rounded text-sm">
+                                    ✔ Wazuh confirme la correction depuis le {{ $day($sca['since']) }} : l'incident peut passer à « Résolu ».
+                                </p>
+                            @endif
+                        @endif
+
+                    </div>
+                @endif
+
+
+                {{-- Historique des alertes regroupées --}}
+                @if($incident->occurrenceLog->count() > 1)
+                    <div class="border-t mt-6 pt-6">
+
+                        <h3 class="text-lg font-semibold mb-4">
+                            Historique des alertes ({{ $incident->occurrenceLog->count() }})
+                        </h3>
+
+                        <ul class="text-sm text-gray-700 space-y-1 max-h-64 overflow-y-auto">
+                            @foreach($incident->occurrenceLog as $occurrence)
+                                <li>
+                                    {{ $occurrence->detected_at?->format('d/m/Y H:i:s') ?? '—' }}
+                                    <code class="text-xs text-gray-500">{{ $occurrence->wazuh_alert_id }}</code>
+                                </li>
+                            @endforeach
+                        </ul>
+
+                    </div>
+                @endif
 
                 {{-- Identifiant Wazuh --}}
                 <div class="border-t mt-6 pt-6">
